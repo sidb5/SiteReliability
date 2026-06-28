@@ -85,6 +85,37 @@ scope enforcement), and evals (anomaly precision/recall, connector lag, cross-te
 
 ---
 
+### Project Architecture Documents
+
+This project was built using a structured vibe coding methodology where architecture was
+fully designed before a single line of code was written. The following documents drove
+every decision in the build:
+
+| Document | Purpose |
+|----------|---------|
+| [CLAUDE.md](CLAUDE.md) | AI operating rules — vibe coding constraints, security rules, session start checklist, and a self-improving lessons loop baked in |
+| [FEATURES.md](FEATURES.md) | Complete product feature list — source of truth for what gets built. Database schema and API surface derived from this. |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Full technical design — DB schema, connector architecture, EWMA algorithm, security model, caching strategy, API versioning |
+| [DECISIONS.md](DECISIONS.md) | 18 architectural decisions with full tradeoff analysis — every major choice documented with alternatives considered and reasons rejected |
+| [ARCHITECT_PROMPTS.md](ARCHITECT_PROMPTS.md) | The architectural questions and challenges raised before and during the build — demonstrates the thinking process behind the system design |
+| [tasks/todo.md](tasks/todo.md) | Module-by-module implementation checklist — 15 modules, exact test cases per module, approval gates |
+| [tasks/lessons.md](tasks/lessons.md) | Self-improving lessons log — every bug found, root cause, and rule derived to prevent recurrence. Updated throughout the build. |
+
+**Why these documents matter:**
+
+The build followed a strict Architect → Engineer model:
+- Architecture was fully specified before Claude Code wrote any code
+- Every module required explicit approval before the next began
+- Claude Code maintained a self-improvement loop via `tasks/lessons.md` — logging mistakes and deriving rules to prevent recurrence
+- Security rules were enforced as hard constraints in `CLAUDE.md`, not guidelines
+
+This approach produced a codebase where every decision is traceable to a document,
+every tradeoff is recorded, and the reasoning is available for review.
+
+> Full prompts audit log of every instruction given to Claude Code during the build: see [prompts.md](prompts.md)
+
+---
+
 ## 2. Architecture Overview
 
 ### System Diagram
@@ -629,6 +660,107 @@ visible. Auto-refreshes every 30s without flash (update-in-place rendering via `
 Operator-role consumer portal. Identical key management capability (all authenticated users
 can manage their own API keys). Nav correctly shows Dashboard and API Keys only — Admin
 tab absent, confirming role-based nav restriction is working correctly.
+
+---
+
+## Quick API Reference
+
+### Data Flow Overview
+
+```
+Apps Being Monitored                    Alert Consumers
+
+─────────────────────                   ───────────────
+
+Push logs via /ingest    →  Watchdog  → Poll GET /alerts
+
+File connector (auto)    →  EWMA AI   → Webhook push
+
+DB connector (auto)      →  Detection → Real-time alerts
+```
+
+### Group A — Log Ingestion
+
+For applications whose logs Watchdog is monitoring.  
+Auth: API Key (`scope: ingest`)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/v1/ingest` | Push single log entry |
+| POST | `/api/v1/ingest/batch` | Push up to 500 entries |
+
+### Group B — Anomaly Consumer APIs
+
+For systems that want to receive detected anomalies.  
+Auth: API Key (`scope: alerts:read`)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/v1/alerts` | List anomalies (filterable, paginated) |
+| GET | `/api/v1/alerts/{id}` | Full anomaly detail + AI enrichment |
+| POST | `/api/v1/alerts/{id}/acknowledge` | Mark alert as seen |
+
+### Group C — Webhook Subscriptions
+
+Receive anomalies pushed to your endpoint in real time.  
+Auth: API Key (`scope: webhooks:manage`)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/v1/admin/keys/{id}/webhook` | Register webhook URL |
+| GET | `/api/v1/admin/keys` | List keys + attached webhook URLs |
+| DELETE | `/api/v1/admin/keys/{id}/webhook` | Remove webhook |
+
+Delivery: HMAC-SHA256 signed POST to your URL.  
+Retry: 3 attempts, backoff 2s / 4s / 8s.  
+Headers: `X-Watchdog-Signature`, `X-Watchdog-Delivery-Id`
+
+### Group D — Source Management
+
+For Tenant Admins connecting log sources.  
+Auth: JWT (Tenant Admin role)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/v1/admin/sources` | Connect a new log source |
+| GET | `/api/v1/admin/sources` | List sources + connector status |
+| PATCH | `/api/v1/admin/sources/{id}` | Update source config |
+| DELETE | `/api/v1/admin/sources/{id}` | Disconnect source |
+
+### Group E — Key & User Management
+
+Auth: JWT (Tenant Admin role)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/v1/admin/keys` | Generate API key (shown once) |
+| GET | `/api/v1/admin/keys` | List keys (prefix only, never value) |
+| POST | `/api/v1/admin/keys/{id}/rotate` | Rotate with 24h grace period |
+| DELETE | `/api/v1/admin/keys/{id}` | Revoke immediately |
+| POST | `/api/v1/admin/users` | Invite user to tenant |
+
+### Group F — Platform Administration
+
+Auth: JWT (Platform Admin role only)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/v1/platform/tenants` | Create tenant account |
+| GET | `/api/v1/platform/tenants` | List all tenants |
+| PATCH | `/api/v1/platform/tenants/{id}` | Suspend / reactivate |
+
+### Group G — Health
+
+Auth: None required
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/v1/health` | App status, DB, cache, engine |
+
+---
+
+Full request/response schemas, curl examples, and webhook integration guide: see [Section 8 — API Reference](#8-api-reference).  
+Interactive API explorer: `http://127.0.0.1:8080/docs`
 
 ---
 
