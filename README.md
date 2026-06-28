@@ -37,6 +37,8 @@ produce false positives that operators learn to ignore. Watchdog's EWMA engine l
 service's individual baseline and adapts continuously, triggering with high precision while
 suppressing noise.
 
+![Watchdog system architecture — connectors, anomaly engine, alert delivery, and multi-tenant isolation](images/architecture.png)
+
 ---
 
 ### Quick Start — Get Into the Running App in Under 2 Minutes
