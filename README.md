@@ -103,6 +103,7 @@ every decision in the build:
 | [ARCHITECT_PROMPTS.md](ARCHITECT_PROMPTS.md) | The architectural questions and challenges raised before and during the build — demonstrates the thinking process behind the system design |
 | [tasks/todo.md](tasks/todo.md) | Module-by-module implementation checklist — 15 modules, exact test cases per module, approval gates |
 | [tasks/lessons.md](tasks/lessons.md) | Self-improving lessons log — every bug found, root cause, and rule derived to prevent recurrence. Updated throughout the build. |
+| [prompts.md](prompts.md) | Complete chronological audit log of every instruction given to Claude Code during the build — the full execution record |
 
 **Why these documents matter:**
 
