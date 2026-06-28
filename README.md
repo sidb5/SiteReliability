@@ -95,6 +95,7 @@ every decision in the build:
 
 | Document | Purpose |
 |----------|---------|
+| [Watchdog_Presentation.pdf](images/Watchdog_Presentation.pdf) | Project presentation — overview of the system, architecture, detection engine, and design decisions |
 | [CLAUDE.md](CLAUDE.md) | AI operating rules — vibe coding constraints, security rules, session start checklist, and a self-improving lessons loop baked in |
 | [FEATURES.md](FEATURES.md) | Complete product feature list — source of truth for what gets built. Database schema and API surface derived from this. |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Full technical design — DB schema, connector architecture, EWMA algorithm, security model, caching strategy, API versioning |
