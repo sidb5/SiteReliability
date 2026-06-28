@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}Watchdog{% endblock %}</title>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, -apple-system, sans-serif; background: #0f1117; color: #e2e8f0; min-height: 100vh; }
+    a { color: #63b3ed; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .nav { display: flex; align-items: center; gap: 1.5rem; padding: 0.75rem 1.5rem;
+           background: #1a1d27; border-bottom: 1px solid #2d3748; }
+    .nav-brand { font-weight: 700; font-size: 1.1rem; color: #63b3ed; }
+    .nav a { font-size: 0.875rem; color: #a0aec0; padding: 0.25rem 0.5rem; border-radius: 4px; }
+    .nav a:hover, .nav a.active { background: #2d3748; color: #e2e8f0; text-decoration: none; }
+    .nav-spacer { flex: 1; }
+    .nav-user { font-size: 0.8rem; color: #718096; }
+
+    .container { max-width: 1280px; margin: 0 auto; padding: 1.5rem; }
+    .page-title { font-size: 1.4rem; font-weight: 600; margin-bottom: 1.5rem; }
+
+    .card { background: #1a1d27; border: 1px solid #2d3748; border-radius: 8px; padding: 1.25rem; }
+    .card-title { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; color: #718096; margin-bottom: 0.5rem; }
+    .stat-value { font-size: 2rem; font-weight: 700; }
+    .stat-label { font-size: 0.8rem; color: #a0aec0; }
+
+    .grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
+    .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; }
+    @media (max-width: 768px) { .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; } }
+
+    .badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 9999px; font-size: 0.7rem; font-weight: 600; }
+    .badge-critical { background: #9b2c2c; color: #feb2b2; }
+    .badge-warning  { background: #744210; color: #fefcbf; }
+    .badge-open     { background: #2b6cb0; color: #bee3f8; }
+    .badge-resolved { background: #276749; color: #c6f6d5; }
+    .badge-acknowledged { background: #553c9a; color: #e9d8fd; }
+
+    table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+    th { text-align: left; padding: 0.5rem 0.75rem; font-size: 0.7rem; text-transform: uppercase; color: #718096; border-bottom: 1px solid #2d3748; }
+    td { padding: 0.6rem 0.75rem; border-bottom: 1px solid #1e2230; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: #20243a; }
+
+    .btn { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.35rem 0.75rem;
+           border-radius: 5px; font-size: 0.8rem; font-weight: 500; cursor: pointer; border: none; }
+    .btn-primary { background: #3182ce; color: white; }
+    .btn-primary:hover { background: #2c5282; }
+    .btn-danger { background: #9b2c2c; color: white; }
+    .btn-danger:hover { background: #742a2a; }
+    .btn-sm { padding: 0.2rem 0.5rem; font-size: 0.75rem; }
+
+    .form-group { margin-bottom: 1rem; }
+    .form-label { display: block; font-size: 0.8rem; color: #a0aec0; margin-bottom: 0.3rem; }
+    .form-input { width: 100%; padding: 0.45rem 0.65rem; background: #0f1117; border: 1px solid #2d3748;
+                  border-radius: 5px; color: #e2e8f0; font-size: 0.875rem; }
+    .form-input:focus { outline: none; border-color: #3182ce; }
+    select.form-input { cursor: pointer; }
+
+    .alert-box { padding: 0.75rem 1rem; border-radius: 6px; margin-bottom: 1rem; font-size: 0.875rem; }
+    .alert-error   { background: #742a2a; border-left: 4px solid #fc8181; }
+    .alert-success { background: #276749; border-left: 4px solid #68d391; }
+
+    .spinner { display: inline-block; width: 1.2rem; height: 1.2rem; border: 2px solid #2d3748;
+               border-top-color: #63b3ed; border-radius: 50%; animation: spin 0.7s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .section { margin-bottom: 2rem; }
+    .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.75rem; }
+    .section-title { font-size: 1rem; font-weight: 600; }
+
+    .empty-state { text-align: center; color: #718096; padding: 2rem; font-size: 0.9rem; }
+
+    .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex;
+                      align-items: center; justify-content: center; z-index: 100; }
+    .modal { background: #1a1d27; border: 1px solid #2d3748; border-radius: 10px; padding: 1.5rem;
+             width: min(480px, 90vw); max-height: 90vh; overflow-y: auto; }
+    .modal-title { font-size: 1.05rem; font-weight: 600; margin-bottom: 1rem; }
+  </style>
+  {% block extra_head %}{% endblock %}
+</head>
+<body>
+  <nav class="nav" x-data="navState()">
+    <span class="nav-brand">&#128065; Watchdog</span>
+    <a href="/dashboard" {% if page == 'dashboard' %}class="active"{% endif %}>Dashboard</a>
+    <a href="/admin" {% if page == 'admin' %}class="active"{% endif %} x-show="isAdmin" style="display:none">Admin</a>
+    <a href="/consumer" {% if page == 'consumer' %}class="active"{% endif %}>API Keys</a>
+    <span class="nav-spacer"></span>
+    <span class="nav-user">
+      <span x-text="email || 'Not signed in'"></span>
+      <span x-show="roleLabel" x-text="roleLabel"
+            style="margin-left:0.4rem;font-size:0.7rem;padding:0.15rem 0.45rem;
+                   border-radius:4px;background:#2d3748;color:#a0aec0;font-weight:500"></span>
+    </span>
+    <a href="#" @click.prevent="signOut()">Sign out</a>
+  </nav>
+  <div class="container">
+    {% block content %}{% endblock %}
+  </div>
+  <script>
+    // Shared auth helpers
+    const API = {
+      token() { return localStorage.getItem('watchdog_token'); },
+      headers() { return { 'Authorization': `Bearer ${this.token()}`, 'Content-Type': 'application/json' }; },
+      async get(path) {
+        const r = await fetch(path, { headers: this.headers() });
+        if (r.status === 401) { window.location = '/'; }
+        return r;
+      },
+      async post(path, body) {
+        return fetch(path, { method: 'POST', headers: this.headers(), body: JSON.stringify(body) });
+      },
+      async patch(path, body) {
+        return fetch(path, { method: 'PATCH', headers: this.headers(), body: JSON.stringify(body) });
+      },
+      async del(path) {
+        return fetch(path, { method: 'DELETE', headers: this.headers() });
+      },
+    };
+
+    const _ROLE_LABELS = {
+      'tenant_admin':    'Tenant Admin',
+      'tenant_operator': 'Operator',
+      'platform_admin':  'Platform Admin',
+    };
+
+    function navState() {
+      return {
+        email: null,
+        roleLabel: '',
+        isAdmin: false,
+        init() {
+          const token = localStorage.getItem('watchdog_token');
+          if (token) {
+            try {
+              const payload = JSON.parse(atob(token.split('.')[1]));
+              this.email = payload.email || payload.sub || 'Authenticated';
+              const role = payload.role || '';
+              this.roleLabel = _ROLE_LABELS[role] || role;
+              this.isAdmin = role === 'tenant_admin' || role === 'platform_admin';
+            } catch {}
+          }
+        },
+        signOut() {
+          localStorage.removeItem('watchdog_token');
+          window.location = '/login';
+        }
+      };
+    }
+    // backward-compat alias for any page-level x-data="authState()" usage
+    const authState = navState;
+  </script>
+  {% block extra_scripts %}{% endblock %}
+</body>
+</html>

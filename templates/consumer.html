@@ -1,0 +1,209 @@
+{% extends "base.html" %}
+{% block title %}API Keys — Watchdog{% endblock %}
+
+{% block content %}
+<div x-data="consumerApp()" x-init="init()">
+  <!-- Login gate -->
+  <div x-show="!token" class="modal-backdrop">
+    <div class="modal">
+      <div class="modal-title">Sign In</div>
+      <div class="alert-box alert-error" x-show="loginError" x-text="loginError"></div>
+      <form @submit.prevent="doLogin">
+        <div class="form-group"><label class="form-label">Email</label>
+          <input class="form-input" type="email" x-model="loginEmail" required /></div>
+        <div class="form-group"><label class="form-label">Password</label>
+          <input class="form-input" type="password" x-model="loginPassword" required /></div>
+        <button class="btn btn-primary" type="submit" style="width:100%">Sign In</button>
+      </form>
+    </div>
+  </div>
+
+  <div x-show="token">
+    <div class="page-title">API Keys &amp; Webhooks</div>
+
+    <!-- Keys section -->
+    <div class="section">
+      <div class="section-header">
+        <span class="section-title">Your API Keys</span>
+        <button class="btn btn-primary btn-sm" @click="showCreateKey=true">+ New Key</button>
+      </div>
+      <div class="card">
+        <div class="empty-state" x-show="keys.length===0 && !loadingKeys">No API keys yet.</div>
+        <div class="spinner" x-show="loadingKeys" style="margin:1rem auto;display:block"></div>
+        <table x-show="keys.length>0 && !loadingKeys">
+          <thead>
+            <tr><th>Name</th><th>Prefix</th><th>Environment</th><th>Scopes</th><th>Webhook</th><th>Expires</th><th></th></tr>
+          </thead>
+          <tbody>
+            <template x-for="k in keys" :key="k.id">
+              <tr>
+                <td x-text="k.name"></td>
+                <td><code x-text="k.key_prefix + '…'"></code></td>
+                <td><span class="badge" :class="k.environment==='live'?'badge-critical':'badge-open'" x-text="k.environment"></span></td>
+                <td style="font-size:0.75rem" x-text="JSON.parse(k.scopes||'[]').join(', ')"></td>
+                <td>
+                  <span x-show="k.webhook_url" style="color:#68d391;font-size:0.8rem">&#10003; Set</span>
+                  <button class="btn btn-sm" x-show="!k.webhook_url" @click="openWebhookModal(k)">+ Attach</button>
+                </td>
+                <td x-text="k.expires_at ? new Date(k.expires_at).toLocaleDateString() : 'Never'"></td>
+                <td style="display:flex;gap:0.3rem">
+                  <button class="btn btn-sm btn-primary" @click="rotateKey(k.id)">Rotate</button>
+                  <button class="btn btn-sm btn-danger" @click="revokeKey(k.id)">Revoke</button>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- One-time secret display -->
+    <div class="modal-backdrop" x-show="newKeySecret" @click.self="newKeySecret=null">
+      <div class="modal">
+        <div class="modal-title">&#9888; Save Your Key Now</div>
+        <p style="font-size:0.85rem;color:#a0aec0;margin-bottom:0.75rem">
+          This key value is shown <strong>once</strong> and cannot be retrieved again.
+        </p>
+        <code style="display:block;background:#0f1117;padding:0.75rem;border-radius:5px;word-break:break-all;font-size:0.8rem;color:#68d391"
+              x-text="newKeySecret"></code>
+        <button class="btn btn-primary" style="width:100%;margin-top:1rem" @click="newKeySecret=null">
+          I've saved it — close
+        </button>
+      </div>
+    </div>
+
+    <!-- Create key modal -->
+    <div class="modal-backdrop" x-show="showCreateKey" @click.self="showCreateKey=false">
+      <div class="modal">
+        <div class="modal-title">Create API Key</div>
+        <div class="alert-box alert-error" x-show="keyError" x-text="keyError"></div>
+        <form @submit.prevent="createKey">
+          <div class="form-group"><label class="form-label">Name</label>
+            <input class="form-input" x-model="newKey.name" required /></div>
+          <div class="form-group"><label class="form-label">Environment</label>
+            <select class="form-input" x-model="newKey.environment">
+              <option value="live">Live</option><option value="test">Test</option></select></div>
+          <div class="form-group">
+            <label class="form-label">Scopes</label>
+            <label style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.3rem;font-size:0.85rem">
+              <input type="checkbox" value="alerts:read" x-model="newKey.scopes" /> alerts:read</label>
+            <label style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.3rem;font-size:0.85rem">
+              <input type="checkbox" value="ingest" x-model="newKey.scopes" /> ingest</label>
+            <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.85rem">
+              <input type="checkbox" value="webhooks:manage" x-model="newKey.scopes" /> webhooks:manage</label>
+          </div>
+          <div style="display:flex;gap:0.5rem;justify-content:flex-end;margin-top:1rem">
+            <button class="btn" type="button" @click="showCreateKey=false">Cancel</button>
+            <button class="btn btn-primary" type="submit">Create</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Webhook attach modal -->
+    <div class="modal-backdrop" x-show="showWebhookModal" @click.self="showWebhookModal=false">
+      <div class="modal">
+        <div class="modal-title">Attach Webhook</div>
+        <div class="alert-box alert-error" x-show="webhookError" x-text="webhookError"></div>
+        <form @submit.prevent="attachWebhook">
+          <div class="form-group"><label class="form-label">Webhook URL</label>
+            <input class="form-input" type="url" x-model="webhookForm.webhook_url" required /></div>
+          <div class="form-group"><label class="form-label">Severity Filter (optional)</label>
+            <select class="form-input" x-model="webhookForm.severity_filter">
+              <option value="">All</option><option value="CRITICAL">Critical only</option><option value="WARNING">Warning only</option></select></div>
+          <div class="form-group"><label class="form-label">Service Filter (optional)</label>
+            <input class="form-input" x-model="webhookForm.service_filter" placeholder="e.g. payments-api" /></div>
+          <div style="display:flex;gap:0.5rem;justify-content:flex-end;margin-top:1rem">
+            <button class="btn" type="button" @click="showWebhookModal=false">Cancel</button>
+            <button class="btn btn-primary" type="submit">Attach</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+function consumerApp() {
+  return {
+    token: localStorage.getItem('watchdog_token'),
+    loginEmail: '', loginPassword: '', loginError: '',
+    keys: [], loadingKeys: false,
+    newKeySecret: null, showCreateKey: false, keyError: '',
+    newKey: { name: '', environment: 'live', scopes: ['alerts:read'] },
+    showWebhookModal: false, webhookError: '',
+    webhookForm: { webhook_url: '', severity_filter: '', service_filter: '' },
+    selectedKeyId: null,
+
+    async doLogin() {
+      const r = await fetch('/api/v1/auth/login', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: this.loginEmail, password: this.loginPassword }),
+      });
+      if (!r.ok) { const d = await r.json(); this.loginError = d.detail?.message || 'Login failed'; return; }
+      const d = await r.json();
+      localStorage.setItem('watchdog_token', d.access_token);
+      this.token = d.access_token;
+      await this.loadKeys();
+    },
+
+    async loadKeys() {
+      this.loadingKeys = true;
+      const r = await API.get('/api/v1/admin/keys');
+      if (r.ok) this.keys = await r.json();
+      this.loadingKeys = false;
+    },
+
+    async createKey() {
+      this.keyError = '';
+      if (this.newKey.scopes.length === 0) { this.keyError = 'Select at least one scope'; return; }
+      const r = await API.post('/api/v1/admin/keys', this.newKey);
+      if (!r.ok) { const d = await r.json(); this.keyError = JSON.stringify(d.detail); return; }
+      const d = await r.json();
+      this.showCreateKey = false;
+      this.newKeySecret = d.plaintext_key;
+      this.newKey = { name: '', environment: 'live', scopes: ['alerts:read'] };
+      await this.loadKeys();
+    },
+
+    async revokeKey(id) {
+      if (!confirm('Revoke this key? It will stop working immediately.')) return;
+      await API.del(`/api/v1/admin/keys/${id}`);
+      await this.loadKeys();
+    },
+
+    async rotateKey(id) {
+      if (!confirm('Rotate this key? You will get a new key and a 24-hour grace period.')) return;
+      const r = await API.post(`/api/v1/admin/keys/${id}/rotate`, {});
+      if (!r.ok) { alert('Rotation failed'); return; }
+      const d = await r.json();
+      this.newKeySecret = d.plaintext_key;
+      await this.loadKeys();
+    },
+
+    openWebhookModal(key) {
+      this.selectedKeyId = key.id;
+      this.webhookForm = { webhook_url: '', severity_filter: '', service_filter: '' };
+      this.webhookError = '';
+      this.showWebhookModal = true;
+    },
+
+    async attachWebhook() {
+      this.webhookError = '';
+      const r = await API.post(`/api/v1/admin/keys/${this.selectedKeyId}/webhook`, this.webhookForm);
+      if (!r.ok) { const d = await r.json(); this.webhookError = JSON.stringify(d.detail); return; }
+      const d = await r.json();
+      this.showWebhookModal = false;
+      this.newKeySecret = `Webhook signing secret (save now): ${d.webhook_secret}`;
+      await this.loadKeys();
+    },
+
+    async init() {
+      if (this.token) await this.loadKeys();
+    }
+  };
+}
+</script>
+{% endblock %}

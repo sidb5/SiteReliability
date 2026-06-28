@@ -1,0 +1,171 @@
+{% extends "base.html" %}
+{% block title %}Platform Admin — Watchdog{% endblock %}
+
+{% block content %}
+<div x-data="platformApp()" x-init="init()">
+  <!-- Login gate -->
+  <div x-show="!token" class="modal-backdrop">
+    <div class="modal">
+      <div class="modal-title">Platform Admin Sign In</div>
+      <div class="alert-box alert-error" x-show="loginError" x-text="loginError"></div>
+      <form @submit.prevent="doLogin">
+        <div class="form-group"><label class="form-label">Email</label>
+          <input class="form-input" type="email" x-model="loginEmail" required /></div>
+        <div class="form-group"><label class="form-label">Password</label>
+          <input class="form-input" type="password" x-model="loginPassword" required /></div>
+        <button class="btn btn-primary" type="submit" style="width:100%">Sign In</button>
+      </form>
+    </div>
+  </div>
+
+  <div x-show="token">
+    <div class="page-title">Platform Administration</div>
+
+    <!-- Summary row -->
+    <div class="grid-3 section">
+      <div class="card">
+        <div class="card-title">Total Tenants</div>
+        <div class="stat-value" x-text="tenants.length"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Active Tenants</div>
+        <div class="stat-value" x-text="tenants.filter(t=>t.active).length"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Platform Version</div>
+        <div class="stat-value" style="font-size:1.2rem" x-text="version || '—'"></div>
+      </div>
+    </div>
+
+    <!-- Tenant list -->
+    <div class="section">
+      <div class="section-header">
+        <span class="section-title">Tenants</span>
+        <button class="btn btn-primary btn-sm" @click="showCreateTenant=true">+ New Tenant</button>
+      </div>
+      <div class="card">
+        <div class="spinner" x-show="loadingTenants" style="margin:1rem auto;display:block"></div>
+        <div class="empty-state" x-show="!loadingTenants && tenants.length===0">No tenants found.</div>
+        <table x-show="!loadingTenants && tenants.length>0">
+          <thead>
+            <tr><th>Name</th><th>Plan</th><th>Contact</th><th>Retention</th><th>Active</th><th>Created</th><th></th></tr>
+          </thead>
+          <tbody>
+            <template x-for="t in tenants" :key="t.id">
+              <tr>
+                <td x-text="t.name"></td>
+                <td><span class="badge badge-open" x-text="t.plan"></span></td>
+                <td x-text="t.contact_email"></td>
+                <td x-text="t.retention_days + 'd / ' + t.log_retention_days + 'd logs'"></td>
+                <td><span x-text="t.active?'Yes':'No'" :style="t.active?'color:#68d391':'color:#fc8181'"></span></td>
+                <td x-text="new Date(t.created_at).toLocaleDateString()"></td>
+                <td>
+                  <button class="btn btn-sm" :class="t.active?'btn-danger':'btn-primary'"
+                    @click="toggleTenant(t)" x-text="t.active?'Deactivate':'Activate'"></button>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Create tenant modal -->
+    <div class="modal-backdrop" x-show="showCreateTenant" @click.self="showCreateTenant=false">
+      <div class="modal">
+        <div class="modal-title">Create Tenant</div>
+        <div class="alert-box alert-error" x-show="tenantError" x-text="tenantError"></div>
+        <form @submit.prevent="createTenant">
+          <div class="form-group"><label class="form-label">Name</label>
+            <input class="form-input" x-model="newTenant.name" required /></div>
+          <div class="form-group"><label class="form-label">Contact Email</label>
+            <input class="form-input" type="email" x-model="newTenant.contact_email" required /></div>
+          <div class="form-group"><label class="form-label">Plan</label>
+            <select class="form-input" x-model="newTenant.plan">
+              <option value="starter">Starter</option>
+              <option value="pro">Pro</option>
+              <option value="enterprise">Enterprise</option>
+            </select></div>
+          <div class="grid-2">
+            <div class="form-group"><label class="form-label">Alert Retention (days)</label>
+              <input class="form-input" type="number" min="1" x-model="newTenant.retention_days" /></div>
+            <div class="form-group"><label class="form-label">Log Retention (days)</label>
+              <input class="form-input" type="number" min="1" x-model="newTenant.log_retention_days" /></div>
+          </div>
+          <div style="display:flex;gap:0.5rem;justify-content:flex-end;margin-top:1rem">
+            <button class="btn" type="button" @click="showCreateTenant=false">Cancel</button>
+            <button class="btn btn-primary" type="submit">Create</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+function platformApp() {
+  return {
+    token: localStorage.getItem('watchdog_token'),
+    loginEmail: '', loginPassword: '', loginError: '',
+    tenants: [], loadingTenants: false,
+    version: null,
+    showCreateTenant: false, tenantError: '',
+    newTenant: { name: '', contact_email: '', plan: 'starter', retention_days: 30, log_retention_days: 7 },
+
+    async doLogin() {
+      const r = await fetch('/api/v1/auth/login', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: this.loginEmail, password: this.loginPassword }),
+      });
+      if (!r.ok) { const d = await r.json(); this.loginError = d.detail?.message || 'Login failed'; return; }
+      const d = await r.json();
+      localStorage.setItem('watchdog_token', d.access_token);
+      this.token = d.access_token;
+      await this.loadAll();
+    },
+
+    async loadAll() {
+      await Promise.all([this.loadTenants(), this.loadVersion()]);
+    },
+
+    async loadTenants() {
+      this.loadingTenants = true;
+      const r = await API.get('/api/v1/platform/tenants');
+      if (r.ok) this.tenants = await r.json();
+      this.loadingTenants = false;
+    },
+
+    async loadVersion() {
+      const r = await API.get('/api/v1/health');
+      if (r.ok) { const d = await r.json(); this.version = d.version; }
+    },
+
+    async createTenant() {
+      this.tenantError = '';
+      const r = await API.post('/api/v1/platform/tenants', {
+        ...this.newTenant,
+        retention_days: parseInt(this.newTenant.retention_days),
+        log_retention_days: parseInt(this.newTenant.log_retention_days),
+      });
+      if (!r.ok) { const d = await r.json(); this.tenantError = JSON.stringify(d.detail); return; }
+      this.showCreateTenant = false;
+      this.newTenant = { name: '', contact_email: '', plan: 'starter', retention_days: 30, log_retention_days: 7 };
+      await this.loadTenants();
+    },
+
+    async toggleTenant(t) {
+      const action = t.active ? 'deactivate' : 'activate';
+      if (!confirm(`${action} tenant "${t.name}"?`)) return;
+      const r = await API.patch(`/api/v1/platform/tenants/${t.id}`, { active: !t.active });
+      if (r.ok) await this.loadTenants();
+    },
+
+    async init() {
+      if (this.token) await this.loadAll();
+    }
+  };
+}
+</script>
+{% endblock %}

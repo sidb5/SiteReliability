@@ -1,0 +1,401 @@
+{% extends "base.html" %}
+{% block title %}Admin — Watchdog{% endblock %}
+
+{% block content %}
+<div x-data="adminApp()" x-init="init()">
+  <!-- Login gate -->
+  <div x-show="!token" class="modal-backdrop">
+    <div class="modal">
+      <div class="modal-title">Sign In</div>
+      <div class="alert-box alert-error" x-show="loginError" x-text="loginError"></div>
+      <form @submit.prevent="doLogin">
+        <div class="form-group"><label class="form-label">Email</label>
+          <input class="form-input" type="email" x-model="loginEmail" required /></div>
+        <div class="form-group"><label class="form-label">Password</label>
+          <input class="form-input" type="password" x-model="loginPassword" required /></div>
+        <button class="btn btn-primary" type="submit" style="width:100%">Sign In</button>
+      </form>
+    </div>
+  </div>
+
+  <div x-show="token">
+    <div class="page-title">Tenant Admin</div>
+
+    <!-- Tab nav -->
+    <div style="display:flex;gap:0.5rem;margin-bottom:1.5rem;border-bottom:1px solid #2d3748;padding-bottom:0.75rem">
+      <button class="btn" :class="tab==='sources'?'btn-primary':''" @click="tab='sources';loadSources()">Sources</button>
+      <button class="btn" :class="tab==='users'?'btn-primary':''" @click="tab='users';loadUsers()">Users</button>
+      <button class="btn" :class="tab==='config'?'btn-primary':''" @click="tab='config';loadConfig()">Retention</button>
+    </div>
+
+    <!-- ------------------------------------------------------------------ -->
+    <!-- SOURCES TAB                                                          -->
+    <!-- ------------------------------------------------------------------ -->
+    <div x-show="tab==='sources'">
+      <div class="section">
+        <div class="section-header">
+          <span class="section-title">Log Sources</span>
+          <button class="btn btn-primary btn-sm" @click="openAddSource()">+ Add Source</button>
+        </div>
+        <div class="card">
+          <div class="empty-state" x-show="sources.length===0 && !sourcesLoading">No sources configured. Click &ldquo;+ Add Source&rdquo; to connect a log stream.</div>
+          <div class="empty-state" x-show="sourcesLoading"><span class="spinner"></span></div>
+          <table x-show="sources.length>0">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Service</th>
+                <th>Type</th>
+                <th>Env</th>
+                <th>Format</th>
+                <th>Poll (s)</th>
+                <th>Status</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="s in sources" :key="s.id">
+                <tr>
+                  <td x-text="s.name"></td>
+                  <td x-text="s.service_name"></td>
+                  <td><span style="text-transform:uppercase;font-size:0.75rem;font-weight:600" x-text="s.source_type"></span></td>
+                  <td><span style="font-size:0.78rem;color:#a0aec0" x-text="s.environment"></span></td>
+                  <td x-text="s.log_format"></td>
+                  <td x-text="s.poll_interval_s"></td>
+                  <td>
+                    <span class="badge"
+                      :class="s.active ? 'badge-resolved' : 'badge-acknowledged'"
+                      x-text="s.active ? 'Active' : 'Paused'">
+                    </span>
+                  </td>
+                  <td style="white-space:nowrap;display:flex;gap:0.4rem">
+                    <button class="btn btn-sm"
+                      style="background:#2d3748;color:#a0aec0"
+                      :title="s.active ? 'Pause connector' : 'Resume connector'"
+                      @click="toggleSource(s.id, s.active)"
+                      x-text="s.active ? 'Pause' : 'Resume'">
+                    </button>
+                    <button class="btn btn-sm btn-danger" @click="deleteSource(s.id)">Delete</button>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Add Source modal -->
+      <div class="modal-backdrop" x-show="showAddSource" @click.self="showAddSource=false">
+        <div class="modal">
+          <div class="modal-title">Add Log Source</div>
+          <div class="alert-box alert-error" x-show="sourceError" x-text="sourceError"></div>
+          <form @submit.prevent="createSource">
+
+            <div class="form-group">
+              <label class="form-label">Name <span style="color:#fc8181">*</span></label>
+              <input class="form-input" placeholder="e.g. payment-api-prod"
+                     x-model="newSource.name" required />
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Service Name <span style="color:#fc8181">*</span></label>
+              <input class="form-input" placeholder="e.g. payment-service"
+                     x-model="newSource.service_name" required />
+              <div style="font-size:0.75rem;color:#718096;margin-top:0.2rem">
+                Must match the <code>service_name</code> field sent in log entries.
+              </div>
+            </div>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem">
+              <div class="form-group">
+                <label class="form-label">Source Type <span style="color:#fc8181">*</span></label>
+                <select class="form-input" x-model="newSource.source_type">
+                  <option value="push">Push (API)</option>
+                  <option value="file">File Tail</option>
+                  <option value="postgres">PostgreSQL</option>
+                  <option value="mysql">MySQL</option>
+                  <option value="sqlite">SQLite</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Log Format</label>
+                <select class="form-input" x-model="newSource.log_format">
+                  <option value="json">JSON</option>
+                  <option value="logfmt">logfmt</option>
+                  <option value="plaintext">Plaintext</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- File path — only shown when type=file -->
+            <div class="form-group" x-show="newSource.source_type === 'file'">
+              <label class="form-label">File Path</label>
+              <input class="form-input" placeholder="/var/log/app/api.log"
+                     x-model="newSource.connection_config" />
+              <div style="font-size:0.75rem;color:#718096;margin-top:0.2rem">
+                Absolute path on the host running Watchdog. Stored encrypted.
+              </div>
+            </div>
+
+            <!-- Connection string — only shown when type is a DB -->
+            <div class="form-group"
+                 x-show="['postgres','mysql','sqlite'].includes(newSource.source_type)">
+              <label class="form-label">Connection String</label>
+              <input class="form-input" type="password"
+                     placeholder="postgresql://user:pass@host:5432/db"
+                     x-model="newSource.connection_config"
+                     autocomplete="off" />
+              <div style="font-size:0.75rem;color:#718096;margin-top:0.2rem">
+                Fernet-encrypted at rest. Never returned in API responses after save.
+              </div>
+            </div>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem">
+              <div class="form-group">
+                <label class="form-label">Environment</label>
+                <input class="form-input" placeholder="production"
+                       x-model="newSource.environment" />
+              </div>
+              <div class="form-group">
+                <label class="form-label">Poll Interval (seconds)</label>
+                <input class="form-input" type="number" min="1" max="3600"
+                       x-model.number="newSource.poll_interval_s" />
+                <div style="font-size:0.75rem;color:#718096;margin-top:0.2rem">Not used for Push type.</div>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Latency Field (optional)</label>
+              <input class="form-input" placeholder="e.g. duration_ms"
+                     x-model="newSource.latency_field" />
+              <div style="font-size:0.75rem;color:#718096;margin-top:0.2rem">
+                JSON key in log entries that holds latency in milliseconds — enables LATENCY_SPIKE detection.
+              </div>
+            </div>
+
+            <div style="display:flex;gap:0.5rem;justify-content:flex-end;margin-top:1rem">
+              <button class="btn" type="button" @click="showAddSource=false">Cancel</button>
+              <button class="btn btn-primary" type="submit" :disabled="sourceSaving">
+                <span x-show="sourceSaving" class="spinner" style="width:0.9rem;height:0.9rem"></span>
+                <span x-text="sourceSaving ? 'Creating…' : 'Create Source'"></span>
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <!-- ------------------------------------------------------------------ -->
+    <!-- USERS TAB                                                            -->
+    <!-- ------------------------------------------------------------------ -->
+    <div x-show="tab==='users'">
+      <div class="section">
+        <div class="section-header">
+          <span class="section-title">Users</span>
+          <button class="btn btn-primary btn-sm" @click="showAddUser=true">+ Add User</button>
+        </div>
+        <div class="card">
+          <div class="empty-state" x-show="users.length===0">No users found.</div>
+          <table x-show="users.length>0">
+            <thead><tr><th>Email</th><th>Role</th><th>Active</th><th>Last Login</th><th></th></tr></thead>
+            <tbody>
+              <template x-for="u in users" :key="u.id">
+                <tr>
+                  <td x-text="u.email"></td>
+                  <td x-text="u.role"></td>
+                  <td><span x-text="u.active?'Yes':'No'" :style="u.active?'color:#68d391':'color:#fc8181'"></span></td>
+                  <td x-text="u.last_login_at ? new Date(u.last_login_at).toLocaleString() : 'Never'"></td>
+                  <td>
+                    <button class="btn btn-sm btn-danger" @click="deleteUser(u.id)">Remove</button>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="modal-backdrop" x-show="showAddUser" @click.self="showAddUser=false">
+        <div class="modal">
+          <div class="modal-title">Add User</div>
+          <div class="alert-box alert-error" x-show="userError" x-text="userError"></div>
+          <form @submit.prevent="createUser">
+            <div class="form-group"><label class="form-label">Email</label>
+              <input class="form-input" type="email" x-model="newUser.email" required /></div>
+            <div class="form-group"><label class="form-label">Password</label>
+              <input class="form-input" type="password" x-model="newUser.password" required /></div>
+            <div class="form-group"><label class="form-label">Role</label>
+              <select class="form-input" x-model="newUser.role">
+                <option value="tenant_operator">Operator</option>
+                <option value="tenant_admin">Admin</option></select></div>
+            <div style="display:flex;gap:0.5rem;justify-content:flex-end;margin-top:1rem">
+              <button class="btn" type="button" @click="showAddUser=false">Cancel</button>
+              <button class="btn btn-primary" type="submit">Create</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <!-- ------------------------------------------------------------------ -->
+    <!-- CONFIG TAB                                                           -->
+    <!-- ------------------------------------------------------------------ -->
+    <div x-show="tab==='config'">
+      <div class="section">
+        <div class="section-title" style="margin-bottom:1rem">Retention Policy</div>
+        <div class="card" style="max-width:480px">
+          <div class="alert-box alert-error" x-show="configError" x-text="configError"></div>
+          <div class="alert-box alert-success" x-show="configSaved">Settings saved.</div>
+          <form @submit.prevent="saveConfig" x-show="config">
+            <div class="form-group">
+              <label class="form-label">Alert Retention (days)</label>
+              <input class="form-input" type="number" min="1" x-model="config.retention_days" required />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Log Retention (days)</label>
+              <input class="form-input" type="number" min="1" x-model="config.log_retention_days" required />
+            </div>
+            <button class="btn btn-primary" type="submit">Save</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+function adminApp() {
+  return {
+    token: localStorage.getItem('watchdog_token'),
+    loginEmail: '', loginPassword: '', loginError: '',
+    tab: 'sources',
+
+    // Sources state
+    sources: [],
+    sourcesLoading: false,
+    showAddSource: false,
+    sourceSaving: false,
+    sourceError: '',
+    newSource: {
+      name: '',
+      service_name: '',
+      source_type: 'push',
+      log_format: 'json',
+      environment: 'production',
+      poll_interval_s: 5,
+      connection_config: null,
+      latency_field: null,
+    },
+
+    // Users state
+    users: [], showAddUser: false, userError: '',
+    newUser: { email:'', password:'', role:'tenant_operator' },
+
+    // Config state
+    config: null, configError: '', configSaved: false,
+
+    // ---- Auth ----
+    async doLogin() {
+      const r = await fetch('/api/v1/auth/login', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: this.loginEmail, password: this.loginPassword }),
+      });
+      if (!r.ok) { const d = await r.json(); this.loginError = d.detail?.message || 'Login failed'; return; }
+      const d = await r.json();
+      localStorage.setItem('watchdog_token', d.access_token);
+      this.token = d.access_token;
+      await this.loadSources();
+    },
+
+    // ---- Sources ----
+    openAddSource() {
+      this.sourceError = '';
+      this.newSource = {
+        name: '', service_name: '', source_type: 'push', log_format: 'json',
+        environment: 'production', poll_interval_s: 5,
+        connection_config: null, latency_field: null,
+      };
+      this.showAddSource = true;
+    },
+
+    async loadSources() {
+      this.sourcesLoading = true;
+      const r = await API.get('/api/v1/admin/sources');
+      if (r.ok) this.sources = await r.json();
+      this.sourcesLoading = false;
+    },
+
+    async createSource() {
+      this.sourceError = '';
+      this.sourceSaving = true;
+      const payload = { ...this.newSource };
+      // Normalise empty strings to null for optional fields
+      if (!payload.connection_config) payload.connection_config = null;
+      if (!payload.latency_field) payload.latency_field = null;
+      const r = await API.post('/api/v1/admin/sources', payload);
+      this.sourceSaving = false;
+      if (!r.ok) {
+        const d = await r.json();
+        this.sourceError = d.detail?.message || JSON.stringify(d.detail);
+        return;
+      }
+      this.showAddSource = false;
+      await this.loadSources();
+    },
+
+    async toggleSource(id, currentlyActive) {
+      // PATCH active: false to pause, active: true to resume
+      await API.patch(`/api/v1/admin/sources/${id}`, { active: !currentlyActive });
+      await this.loadSources();
+    },
+
+    async deleteSource(id) {
+      if (!confirm('Delete this source? This cannot be undone.')) return;
+      await API.del(`/api/v1/admin/sources/${id}`);
+      await this.loadSources();
+    },
+
+    // ---- Users ----
+    async loadUsers() {
+      const r = await API.get('/api/v1/admin/users');
+      if (r.ok) this.users = await r.json();
+    },
+    async createUser() {
+      this.userError = '';
+      const r = await API.post('/api/v1/admin/users', this.newUser);
+      if (!r.ok) { const d = await r.json(); this.userError = d.detail?.message || JSON.stringify(d.detail); return; }
+      this.showAddUser = false;
+      this.newUser = { email:'', password:'', role:'tenant_operator' };
+      await this.loadUsers();
+    },
+    async deleteUser(id) {
+      if (!confirm('Remove this user?')) return;
+      await API.del(`/api/v1/admin/users/${id}`);
+      await this.loadUsers();
+    },
+
+    // ---- Config ----
+    async loadConfig() {
+      const r = await API.get('/api/v1/admin/config');
+      if (r.ok) this.config = await r.json();
+    },
+    async saveConfig() {
+      this.configError = ''; this.configSaved = false;
+      const r = await API.patch('/api/v1/admin/config', {
+        retention_days: parseInt(this.config.retention_days),
+        log_retention_days: parseInt(this.config.log_retention_days),
+      });
+      if (!r.ok) { const d = await r.json(); this.configError = JSON.stringify(d.detail); return; }
+      this.configSaved = true;
+      setTimeout(() => this.configSaved = false, 3000);
+    },
+
+    async init() {
+      if (this.token) await this.loadSources();
+    }
+  };
+}
+</script>
+{% endblock %}

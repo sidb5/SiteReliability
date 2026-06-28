@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Watchdog — Sign In</title>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, -apple-system, sans-serif; background: #0f1117; color: #e2e8f0;
+           min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+    .card { background: #1a1d27; border: 1px solid #2d3748; border-radius: 10px; padding: 2rem; width: min(380px, 90vw); }
+    .brand { font-size: 1.4rem; font-weight: 700; color: #63b3ed; text-align: center; margin-bottom: 0.25rem; }
+    .subtitle { text-align: center; font-size: 0.8rem; color: #718096; margin-bottom: 1.5rem; }
+    .form-group { margin-bottom: 1rem; }
+    .form-label { display: block; font-size: 0.8rem; color: #a0aec0; margin-bottom: 0.3rem; }
+    .form-input { width: 100%; padding: 0.5rem 0.7rem; background: #0f1117; border: 1px solid #2d3748;
+                  border-radius: 5px; color: #e2e8f0; font-size: 0.875rem; }
+    .form-input:focus { outline: none; border-color: #3182ce; }
+    .btn { width: 100%; padding: 0.6rem; border-radius: 5px; font-size: 0.9rem; font-weight: 600;
+           cursor: pointer; border: none; background: #3182ce; color: white; margin-top: 0.5rem; }
+    .btn:hover { background: #2c5282; }
+    .btn:disabled { opacity: 0.6; cursor: not-allowed; }
+    .error { background: #742a2a; border-left: 4px solid #fc8181; padding: 0.6rem 0.8rem;
+             border-radius: 4px; font-size: 0.8rem; margin-bottom: 1rem; }
+  </style>
+</head>
+<body>
+  <div class="card" x-data="loginApp()">
+    <div class="brand">&#128065; Watchdog</div>
+    <div class="subtitle">Intelligent Observability &amp; Event Watchdog</div>
+
+    <div class="error" x-show="error" x-text="error"></div>
+
+    <form @submit.prevent="login">
+      <div class="form-group">
+        <label class="form-label">Email</label>
+        <input class="form-input" type="email" x-model="email" required placeholder="you@example.com" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Password</label>
+        <input class="form-input" type="password" x-model="password" required placeholder="••••••••" />
+      </div>
+      <button class="btn" type="submit" :disabled="loading">
+        <span x-show="loading">Signing in…</span>
+        <span x-show="!loading">Sign In</span>
+      </button>
+    </form>
+    <p style="text-align:center;font-size:0.75rem;color:#718096;margin-top:1rem;">
+      v{{ app_version }}
+    </p>
+  </div>
+
+  <script>
+    function loginApp() {
+      return {
+        email: '', password: '', loading: false, error: '',
+        async login() {
+          this.loading = true; this.error = '';
+          try {
+            const r = await fetch('/api/v1/auth/login', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ email: this.email, password: this.password }),
+            });
+            if (!r.ok) {
+              const d = await r.json();
+              this.error = d.detail?.message || d.detail || 'Login failed';
+            } else {
+              const d = await r.json();
+              localStorage.setItem('watchdog_token', d.access_token);
+              window.location = '/dashboard';
+            }
+          } catch (e) {
+            this.error = 'Network error — is the server running?';
+          } finally {
+            this.loading = false;
+          }
+        },
+        init() {
+          if (localStorage.getItem('watchdog_token')) window.location = '/dashboard';
+        }
+      };
+    }
+  </script>
+</body>
+</html>

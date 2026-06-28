@@ -1,0 +1,253 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — Watchdog{% endblock %}
+
+{% block content %}
+<div x-data="dashboardApp()" x-init="init()">
+  <!-- Login gate -->
+  <div x-show="!token" class="modal-backdrop">
+    <div class="modal">
+      <div class="modal-title">Sign In</div>
+      <div class="alert-box alert-error" x-show="loginError" x-text="loginError"></div>
+      <form @submit.prevent="doLogin">
+        <div class="form-group">
+          <label class="form-label">Email</label>
+          <input class="form-input" type="email" x-model="loginEmail" required />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Password</label>
+          <input class="form-input" type="password" x-model="loginPassword" required />
+        </div>
+        <button class="btn btn-primary" type="submit" style="width:100%" :disabled="loginLoading">
+          <span x-show="loginLoading">Signing in…</span>
+          <span x-show="!loginLoading">Sign In</span>
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Main content -->
+  <div x-show="token">
+    <div class="page-title">Operator Dashboard</div>
+
+    <!-- Summary stats -->
+    <div class="grid-4 section" x-show="summary">
+      <div class="card">
+        <div class="card-title">Open Alerts</div>
+        <div class="stat-value" x-text="summary?.open ?? '—'"></div>
+        <div class="stat-label" x-text="(summary?.critical_open ?? 0) + ' critical'"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Warning Open</div>
+        <div class="stat-value" x-text="summary?.warning_open ?? '—'"></div>
+        <div class="stat-label">active warnings</div>
+      </div>
+      <div class="card">
+        <div class="card-title">Resolved</div>
+        <div class="stat-value" x-text="summary?.resolved ?? '—'"></div>
+        <div class="stat-label">all time</div>
+      </div>
+      <div class="card">
+        <div class="card-title">Active Sources</div>
+        <div class="stat-value" x-text="summary?.active_sources ?? '—'"></div>
+        <div class="stat-label">connectors</div>
+      </div>
+    </div>
+
+    <!-- Alert feed -->
+    <div class="section">
+      <div class="section-header">
+        <span class="section-title">Recent Alerts</span>
+        <div style="display:flex;gap:0.5rem;align-items:center">
+          <select class="form-input" style="width:auto;padding:0.25rem 0.5rem;font-size:0.8rem" x-model="filterSeverity" @change="loadAlerts()">
+            <option value="">All severities</option>
+            <option value="CRITICAL">Critical</option>
+            <option value="WARNING">Warning</option>
+          </select>
+          <select class="form-input" style="width:auto;padding:0.25rem 0.5rem;font-size:0.8rem" x-model="filterStatus" @change="loadAlerts()">
+            <option value="">All statuses</option>
+            <option value="open">Open</option>
+            <option value="resolved">Resolved</option>
+            <option value="acknowledged">Acknowledged</option>
+          </select>
+          <button class="btn btn-sm btn-primary" @click="loadAlerts()">Refresh</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="spinner" x-show="loadingAlerts" style="margin:1rem auto;display:block"></div>
+        <div class="empty-state" x-show="!loadingAlerts && alerts.length === 0">No alerts found.</div>
+        <table x-show="!loadingAlerts && alerts.length > 0">
+          <thead>
+            <tr>
+              <th>Service</th><th>Type</th><th>Severity</th><th>Status</th><th>Detected</th><th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="a in alerts" :key="a.id">
+              <tr>
+                <td x-text="a.service_name"></td>
+                <td x-text="a.anomaly_type"></td>
+                <td><span class="badge" :class="a.severity==='CRITICAL'?'badge-critical':'badge-warning'" x-text="a.severity"></span></td>
+                <td><span class="badge" :class="'badge-'+a.status" x-text="a.status"></span></td>
+                <td x-text="new Date(a.detected_at).toLocaleString()"></td>
+                <td>
+                  <button class="btn btn-sm btn-primary" x-show="a.status==='open'" @click="ack(a.id)">ACK</button>
+                  <span x-show="a.status!=='open'" style="color:#718096;font-size:0.75rem" x-text="a.acknowledged_by || '—'"></span>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+        <div style="display:flex;justify-content:space-between;padding:0.75rem 0 0;font-size:0.8rem;color:#718096" x-show="alerts.length > 0">
+          <button class="btn btn-sm" :disabled="!prevCursor" @click="goBack()">← Prev</button>
+          <span x-text="`Showing ${alerts.length} alerts`"></span>
+          <button class="btn btn-sm" :disabled="!nextCursor" @click="goNext()">Next →</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Trend chart -->
+    <div class="section card">
+      <div class="section-header">
+        <span class="section-title">Alert Trend (24h)</span>
+        <div style="display:flex;gap:0.5rem">
+          <button class="btn btn-sm" :class="trendHours==6?'btn-primary':''" @click="setTrend(6)">6h</button>
+          <button class="btn btn-sm" :class="trendHours==24?'btn-primary':''" @click="setTrend(24)">24h</button>
+          <button class="btn btn-sm" :class="trendHours==72?'btn-primary':''" @click="setTrend(72)">72h</button>
+        </div>
+      </div>
+      <canvas id="trendChart" height="80"></canvas>
+    </div>
+
+    <!-- Auto-refresh indicator -->
+    <p style="font-size:0.75rem;color:#4a5568;text-align:right">
+      Auto-refreshes every 30s &bull; Last: <span x-text="lastRefresh"></span>
+    </p>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+function dashboardApp() {
+  return {
+    token: localStorage.getItem('watchdog_token'),
+    loginEmail: '', loginPassword: '', loginLoading: false, loginError: '',
+    summary: null, alerts: [], loadingAlerts: false,
+    filterSeverity: '', filterStatus: 'open',
+    nextCursor: null, prevCursor: null, cursorStack: [],
+    trendHours: 24, chart: null,
+    lastRefresh: '—', refreshTimer: null,
+
+    async doLogin() {
+      this.loginLoading = true; this.loginError = '';
+      try {
+        const r = await fetch('/api/v1/auth/login', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: this.loginEmail, password: this.loginPassword }),
+        });
+        if (!r.ok) {
+          const d = await r.json();
+          this.loginError = d.detail?.message || 'Login failed';
+        } else {
+          const d = await r.json();
+          localStorage.setItem('watchdog_token', d.access_token);
+          this.token = d.access_token;
+          await this.loadAll();
+        }
+      } catch { this.loginError = 'Network error'; }
+      this.loginLoading = false;
+    },
+
+    async loadAll() {
+      await Promise.all([this.loadSummary(), this.loadAlerts(), this.loadTrend()]);
+    },
+
+    async loadSummary() {
+      const r = await API.get('/api/v1/dashboard/summary');
+      if (r.ok) this.summary = await r.json();
+    },
+
+    async loadAlerts() {
+      this.loadingAlerts = true;
+      let url = `/api/v1/alerts?limit=20&status=${this.filterStatus}&severity=${this.filterSeverity}`;
+      if (this.nextCursor) url += `&cursor=${this.nextCursor}`;
+      const r = await API.get(url);
+      if (r.ok) {
+        const d = await r.json();
+        this.alerts = d.items;
+        this.nextCursor = d.next_cursor;
+      }
+      this.loadingAlerts = false;
+      this.lastRefresh = new Date().toLocaleTimeString();
+    },
+
+    async ack(id) {
+      const r = await API.post(`/api/v1/alerts/${id}/acknowledge`, {});
+      if (r.ok) this.loadAlerts();
+    },
+
+    async loadTrend() {
+      const r = await API.get(`/api/v1/dashboard/trend?hours=${this.trendHours}`);
+      if (!r.ok) return;
+      const d = await r.json();
+      this.renderChart(d.labels, d.counts);
+    },
+
+    async setTrend(h) {
+      this.trendHours = h;
+      await this.loadTrend();
+    },
+
+    renderChart(labels, counts) {
+      const canvas = document.getElementById('trendChart');
+      if (!canvas) return;
+      const displayLabels = labels.map(l => l.slice(11, 16));
+      if (this.chart) {
+        // Update in-place — no destroy/recreate, no canvas blank flash
+        this.chart.data.labels = displayLabels;
+        this.chart.data.datasets[0].data = counts;
+        this.chart.update('none');  // 'none' skips animation on refresh
+        return;
+      }
+      this.chart = new Chart(canvas, {
+        type: 'line',
+        data: {
+          labels: displayLabels,
+          datasets: [{ label: 'Alerts', data: counts, borderColor: '#63b3ed',
+            backgroundColor: 'rgba(99,179,237,0.1)', tension: 0.3, fill: true, pointRadius: 2 }]
+        },
+        options: {
+          responsive: true,
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { ticks: { color: '#718096', maxTicksLimit: 8 }, grid: { color: '#1e2230' } },
+            y: { ticks: { color: '#718096' }, grid: { color: '#1e2230' }, beginAtZero: true, precision: 0 }
+          }
+        }
+      });
+    },
+
+    destroyChart() {
+      if (this.chart) { this.chart.destroy(); this.chart = null; }
+    },
+
+    goNext() {
+      if (this.nextCursor) {
+        this.cursorStack.push(this.nextCursor);
+        this.loadAlerts();
+      }
+    },
+    goBack() {
+      this.cursorStack.pop();
+      this.nextCursor = this.cursorStack[this.cursorStack.length - 1] || null;
+      this.loadAlerts();
+    },
+
+    async init() {
+      if (this.token) await this.loadAll();
+      this.refreshTimer = setInterval(() => { if (this.token) this.loadAll(); }, 30000);
+    }
+  };
+}
+</script>
+{% endblock %}

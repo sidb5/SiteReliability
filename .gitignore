@@ -1,0 +1,47 @@
+# Secrets — never commit
+.env
+
+# SQLite databases
+*.db
+*.db-shm
+*.db-wal
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Alembic (keep versions, ignore pycache inside)
+migrations/__pycache__/
+migrations/versions/__pycache__/
+
+# Logs
+*.log
+logs/
